@@ -18,7 +18,7 @@ def train_model():
     
     print("Eğitim başlıyor...")
     # Eğitim adımı (Proje için 50,000 - 100,000 arası önerilir)
-    model.learn(total_timesteps=50000, log_interval=10)
+    model.learn(total_timesteps=50000, log_interval=10, progress_bar=True)
     
     # Modeli kaydet
     os.makedirs("models", exist_ok=True)

@@ -1,16 +1,15 @@
 import pandas as pd
 import numpy as np
 
-def load_epias_wind_data(filepath="data/epias_wind_data.csv", max_steps=1000):
+def load_epias_wind_data(filepath="data/Gercek_Zamanli_Uretim-20112025-20022026.csv", max_steps=1000):
     """
     EPİAŞ CSV verisini okur, Türkçe sayı formatını düzeltir ve normalize eder.
     """
     try:
-        # EPİAŞ verilerinde binlik ayracı nokta, ondalık virgül olabilir.
-        df = pd.read_csv(filepath, sep=',', decimal=',', thousands='.')
+        # EPİAŞ verilerinde ayraç noktalı virgül (;), ondalık virgül (,), binlik ayracı nokta (.)
+        df = pd.read_csv(filepath, sep=';', decimal=',', thousands='.')
         
-        # Sütun isimleri EPİAŞ'ta farklı olabilir, genellikle 'Rüzgar' veya 'Wind' geçer.
-        # İndirdiğin CSV'ye bakıp buradaki sütun adını tam olarak eşleştir!
+        # Sütun adı yüklenen CSV dosyası ile birebir eşleştirildi
         wind_column = 'Rüzgar' 
         
         # Sadece rüzgar verisini al ve boşlukları (NaN) temizle
@@ -18,10 +17,14 @@ def load_epias_wind_data(filepath="data/epias_wind_data.csv", max_steps=1000):
         
         # Veriyi Normalize Et (0 ile 1 arasına çek)
         max_power = np.max(wind_power)
+        
+        # 0'a bölme hatasını engellemek için güvenlik kontrolü (DRL algoritmalarında nan değerleri engeller)
+        if max_power == 0:
+            return np.zeros(max_steps)
+            
         normalized_wind = wind_power / max_power
         
-        # Elimizdeki veri (örn: 24 saat = 24 veri) simülasyon adımlarından (örn 1000) azsa,
-        # aralara interpolasyon (veri uydurma) yaparak saniyelik/milisaniyelik hale getir.
+        # Simülasyon adımlarına göre interpolasyon uygula
         x_original = np.linspace(0, 1, len(normalized_wind))
         x_target = np.linspace(0, 1, max_steps)
         interpolated_wind = np.interp(x_target, x_original, normalized_wind)
@@ -31,4 +34,5 @@ def load_epias_wind_data(filepath="data/epias_wind_data.csv", max_steps=1000):
     except Exception as e:
         print(f"Hata oluştu: {e}")
         print("CSV dosyasının yolunu ve sütun adını kontrol et.")
-        return np.zeros(max_steps) # Hata anında sistem çökmesin diye sıfır döner
+        # Hata anında sistemin çökmesini engellemek için sıfır dizisi döndür
+        return np.zeros(max_steps)
