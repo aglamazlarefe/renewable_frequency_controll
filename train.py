@@ -1,29 +1,57 @@
 import os
-from stable_baselines3 import DDPG
-from stable_baselines3.common.noise import NormalActionNoise
 import numpy as np
+from stable_baselines3 import TD3
+from stable_baselines3.common.noise import NormalActionNoise
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from envs.microgrid_lfc_env import MicrogridLFCEnv
 
 def train_model():
-    # Ortamı başlat
-    env = MicrogridLFCEnv(max_steps=2000)
+    # 1. PARALELLEŞTİRME: Ortamı 8 paralel kopyaya bölüyoruz (RTX 3060 için ideal)
+    # Bu, 1 gerçek saniyede 8 saniyelik veri toplamanı sağlar.
+    n_envs = 8
+    print(f"{n_envs} paralel ortam oluşturuluyor...")
     
-    # Sürekli eylem uzayı için gürültü (Exploration için gerekli)
+    env = make_vec_env(
+        MicrogridLFCEnv, 
+        n_envs=n_envs, 
+        seed=42, 
+        vec_env_cls=SubprocVecEnv,
+        env_kwargs={"max_steps": 1000}
+    )
+    
+    # 2. HIZLI YAKINSAMA İÇİN HİPERPARAMETRELER
     n_actions = env.action_space.shape[-1]
     action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
     
-    # DDPG Modelini tanımla
-    model = DDPG("MlpPolicy", env, action_noise=action_noise, verbose=1, 
-                 learning_rate=1e-3, buffer_size=100000, batch_size=128, device="cuda")
+    # Batch size'ı 512 yaparak GPU çekirdeklerini tam dolduruyoruz.
+    # Learning rate'i hafifçe artırarak (5e-4) öğrenmeyi hızlandırıyoruz.
+    model = TD3(
+        "MlpPolicy", 
+        env, 
+        action_noise=action_noise, 
+        verbose=1, 
+        learning_rate=5e-4, 
+        buffer_size=100000, 
+        batch_size=512, 
+        device="cuda",
+        train_freq=(1, "step"),
+        gradient_steps=1,
+        learning_starts=5000, # Buffer dolana kadar hızlı başla
+        tau=0.001
+    )
     
-    print("Eğitim başlıyor...")
-    # Eğitim adımı (Proje için 50,000 - 100,000 arası önerilir)
-    model.learn(total_timesteps=50000, log_interval=10, progress_bar=True)
+    # 3. EĞİTİM
+    # 300.000 adım / 8 env = Her env başına 37.500 adım. Çok daha hızlı bitecek.
+    total_steps = 300000
+    print(f"Eğitim başlıyor: {total_steps} toplam adım (Paralel)... hedef < 15 dk.")
     
-    # Modeli kaydet
+    model.learn(total_timesteps=total_steps, progress_bar=True)
+    
+    # 4. KAYDET
     os.makedirs("models", exist_ok=True)
-    model.save("models/ddpg_microgrid_model")
-    print("Model başarıyla kaydedildi: models/ddpg_microgrid_model.zip")
+    model.save("models/td3_microgrid_model")
+    print("Model başarıyla kaydedildi: models/td3_microgrid_model.zip")
 
 if __name__ == "__main__":
     train_model()
