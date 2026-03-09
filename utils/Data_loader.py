@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-def load_epias_wind_data(filepath="data/Gercek_Zamanli_Uretim-20112025-20022026.csv", max_steps=1000):
+def load_epias_wind_data(filepath="data/epias_wind_data.csv", max_steps=1000):
     """
     EPİAŞ CSV verisini okur, Türkçe sayı formatını düzeltir ve normalize eder.
     """

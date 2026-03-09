@@ -6,81 +6,143 @@ from utils.Data_loader import load_epias_wind_data
 class MicrogridLFCEnv(gym.Env):
     def __init__(self, data_path="data/epias_wind_data.csv", max_steps=1000):
         super(MicrogridLFCEnv, self).__init__()
-        # Fiziksel Sabitler
-        self.M, self.D, self.dt, self.K_vir = 4.0, 0.015, 0.1, 0.5
-        self.max_steps = max_steps
-        self.current_step = 0
+
+        # ── Fiziksel Sabitler ──────────────────────────────────────
+        self.M     = 4.0   
+        self.D     = 0.8   
+        self.dt    = 0.1
+        self.K_vir = 0.5
+
+        self.max_steps         = max_steps
+        self.current_step      = 0
+        self.base_load_default = 0.6
+
         self.wind_profile = load_epias_wind_data(data_path, self.max_steps)
-        self.base_load_default = 0.6 
-        
-        # Gözlem: [Frekans Sapması, Rüzgar Gücü, Önceki Batarya Gücü]
+
+        # Gözlem: [delta_f_norm, wind_power, prev_p_ess]
         self.observation_space = spaces.Box(
-            low=np.array([-1.0, -1.0, -1.0], dtype=np.float32), 
-            high=np.array([1.0, 1.0, 1.0], dtype=np.float32), 
+            low=np.array([-1.0, -1.0, -1.0], dtype=np.float32),
+            high=np.array([ 1.0,  1.0,  1.0], dtype=np.float32),
             dtype=np.float32
         )
-        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
-        
-        self.delta_f = 0.0
+        self.action_space = spaces.Box(
+            low=-1.0, high=1.0, shape=(1,), dtype=np.float32
+        )
+
+        self.delta_f      = 0.0
         self.prev_delta_f = 0.0
-        self.prev_p_ess = 0.0 
-        self.base_load = 0.6
+        self.prev_p_ess   = 0.0
+        self.base_load    = self.base_load_default
+
+        # PI Kalkan parametreleri
+        self.KP_PI       = 20.0
+        self.KI_PI       = 8.0
+        self.pi_integral = 0.0
+        self.SHIELD_THR  = 0.15  # Hz
+
+        self._ep_f_sq_sum     = 0.0
+        self._ep_jitter       = 0.0
+        self._ep_shield_steps = 0
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
-        self.current_step, self.delta_f, self.prev_delta_f, self.prev_p_ess = 0, 0.0, 0.0, 0.0
-        # Eğitimde ajanı zorlamak için yükü randomize ediyoruz
-        self.base_load = self.base_load_default + np.random.uniform(-0.05, 0.05)
+        self.current_step = 0
+        self.delta_f      = 0.0
+        self.prev_delta_f = 0.0
+        self.prev_p_ess   = 0.0
+        self.pi_integral  = 0.0
+        self.base_load    = self.base_load_default + np.random.uniform(-0.05, 0.05)
+
+        self._ep_f_sq_sum     = 0.0
+        self._ep_jitter       = 0.0
+        self._ep_shield_steps = 0
+
         return self._get_obs(), {}
 
-    def _get_obs(self):
-        step_idx = min(self.current_step, self.max_steps - 1)
-        return np.array([
-            np.float32(self.delta_f), 
-            np.float32(self.wind_profile[step_idx]), 
-            np.float32(self.prev_p_ess)
-        ], dtype=np.float32)
-
     def step(self, action):
-        raw_p_ess = action[0]
-        
-        # --- KRİTİK MÜDAHALE: MEKANİK RAMPA SINIRI (SLEW RATE) ---
-        # Jitter'ı 10'un altına çekmek için değişimi %1 (0.01) ile sınırlıyoruz.
-        # Bu, bataryanın 0'dan 1.0 güce çıkması için en az 10 saniye (100 adım) geçmesini zorunlu kılar.
-        diff = raw_p_ess - self.prev_p_ess
-        p_ess = self.prev_p_ess + np.clip(diff, -0.01, 0.01) 
-        p_ess = p_ess * 0.92 # Hafif sönümleme
+        raw_p_ess = float(action[0])
 
-        p_wind = self.wind_profile[min(self.current_step, self.max_steps - 1)]
-        p_load = self.base_load + np.random.normal(0, 0.002) 
-        
-        # Dinamik Denklem (Swing Equation)
-        df_dt = (self.delta_f - self.prev_delta_f) / self.dt
-        virtual_inertia_power = -self.K_vir * df_dt
-        delta_p = (p_wind + p_ess + virtual_inertia_power) - p_load
-        
+        # 1) SLEW RATE — 0.015 yetersizdi, 0.025'e çıkarıldı (Çeviklik artırıldı)
+        diff  = raw_p_ess - self.prev_p_ess
+        p_cmd = self.prev_p_ess + np.clip(diff, -0.025, 0.025)
+        p_cmd = float(np.clip(p_cmd, -1.0, 1.0))
+
+        # 2) SAFETY SHIELD
+        shield_active = False
+        if abs(self.delta_f) > self.SHIELD_THR:
+            shield_active = True
+            self._ep_shield_steps += 1
+            error             = -self.delta_f
+            self.pi_integral += error * self.dt
+            self.pi_integral  = np.clip(self.pi_integral, -0.5, 0.5)
+            p_ess = float(np.clip(
+                self.KP_PI * error + self.KI_PI * self.pi_integral, -1.0, 1.0
+            ))
+        else:
+            p_ess = p_cmd
+            # Bumpless transfer: AI devralırken integral yavaşça söner
+            self.pi_integral *= 0.90 
+
+        # 3) Rüzgâr ve yük
+        step_idx  = min(self.current_step, self.max_steps - 1)
+        p_wind    = float(self.wind_profile[step_idx])
+        p_load    = self.base_load + np.random.normal(0, 0.002)
+
+        # 4) Swing denklemi
+        df_dt     = (self.delta_f - self.prev_delta_f) / self.dt
+        p_virtual = -self.K_vir * df_dt
+        delta_p   = (p_wind + p_ess + p_virtual) - p_load
+
         self.prev_delta_f = self.delta_f
-        self.delta_f += ((delta_p - self.D * self.delta_f) / self.M) * self.dt
+        self.delta_f = float(np.clip(
+            self.delta_f + ((delta_p - self.D * self.delta_f) / self.M) * self.dt,
+            -0.5, 0.5
+        ))
+
+        # 5) ÖDÜL DENGESİ (REVISED)
+        # Bonus: Otonomiye ciddi puan ver
+        bonus     = 5.0 if not shield_active else -2.0
         
-        # --- ÖDÜL SİSTEMİ (Vibrasyonu Öldüren Denge) ---
-        # Otonomi bonusunu azalttık (Ajan hile yapmasın diye)
-        reward = 1.0 
+        # Frekans Cezası: 25.0 -> 120.0 (Ajan frekans hatasını ciddiye almalı)
+        f_penalty = 120.0 * (self.delta_f ** 2)
         
-        f_penalty = 20.0 * (self.delta_f ** 2)
-        e_penalty = 50.0 * (p_ess ** 2) 
-        # Jitter cezası devasa artırıldı (1500). Titreme = Ölümcül Ceza.
-        j_penalty = 1500.0 * (p_ess - self.prev_p_ess)**2
+        # Enerji Cezası: Düşürüldü, ajan bataryayı kullanmaktan korkmamalı
+        e_penalty = 5.0 * (p_ess ** 2)
         
-        # Bariyer: 0.10'dan itibaren ajanı 'fren yapmaya' zorlar
-        barrier = 0
-        if abs(self.delta_f) > 0.10:
-            barrier = 400.0 * (abs(self.delta_f) - 0.10)**2
+        # Jitter Cezası: Shield aktifse ceza kesilmez (Ajanın suçu değil)
+        # Slew rate arttığı için katsayı 500 -> 350 yapıldı
+        j_penalty = 350.0 * (p_ess - self.prev_p_ess) ** 2 if not shield_active else 0.0
         
-        total_reward = reward - (f_penalty + e_penalty + j_penalty + barrier)
-            
-        self.prev_p_ess = p_ess 
+        barrier   = 400.0 * max(0, abs(self.delta_f) - 0.11) ** 2
+
+        total_reward = bonus - (f_penalty + e_penalty + j_penalty + barrier)
+
+        # 6) Metrik güncelle
+        self._ep_f_sq_sum += self.delta_f ** 2
+        self._ep_jitter   += abs(p_ess - self.prev_p_ess)
+        self.prev_p_ess    = p_ess
         self.current_step += 1
         terminated = bool(self.current_step >= self.max_steps)
-        
-        return self._get_obs(), total_reward, terminated, False, {}
 
+        info = {
+            "p_ess":         p_ess,
+            "delta_f":       self.delta_f,
+            "shield_active": shield_active,
+        }
+        if terminated:
+            n = max(self.current_step, 1)
+            info["ep_rmse_f"]     = float(np.sqrt(self._ep_f_sq_sum / n))
+            info["ep_jitter"]     = float(self._ep_jitter)
+            info["ep_autonomy"]   = 1.0 - self._ep_shield_steps / n
+
+        return self._get_obs(), total_reward, terminated, False, info
+
+    def _get_obs(self):
+        step_idx     = min(self.current_step, self.max_steps - 1)
+        # Ölçekleme: Ajan küçük sapmaları (20-30 mHz) daha net görsün
+        delta_f_norm = float(np.clip(self.delta_f / 0.2, -1.0, 1.0))
+        return np.array([
+            delta_f_norm,
+            float(self.wind_profile[step_idx]),
+            float(self.prev_p_ess)
+        ], dtype=np.float32)
