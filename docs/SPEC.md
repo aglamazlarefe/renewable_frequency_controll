@@ -154,7 +154,15 @@ Metrik anahtarları ve tanımları §7'de.
 
 ### 3.9 `utils/plotting.py`
 Her fonksiyon bir dosya kaydeder ve yolunu döndürür; `matplotlib` arka ucu `Agg`. Ekrana çizim yok.
-İmzalar D paketinde belirlenir ve modül docstring'inde belgelenir; `evaluate.py` onları kullanır.
+Tek giriş noktası (`evaluate.py` yalnızca bunu çağırır):
+```python
+def make_all_figures(example_trajs: dict[str, dict[str, np.ndarray]],   # kontrolcü adı → run_episode çıktısı (aynı örnek senaryo)
+                     example_scenario: Scenario,
+                     delta_f_all: dict[str, np.ndarray],                # kontrolcü adı → tüm test senaryolarının Δf'i (birleştirilmiş, Hz)
+                     results: dict,                                     # SPEC §3.12 sözlüğü
+                     out_dir: str | Path) -> list[Path]                 # 7 dosyanın yolları, Fig1…Fig7 sırasıyla
+```
+Her şekil için ayrı fonksiyonlar modül içinde serbestçe tanımlanır.
 Fonksiyonlar eksik kontrolcülere (ör. SAC modeli yok) ve boş Pareto taramasına dayanıklı olmalıdır.
 Üretilecek dosyalar (`figures/`): `Fig1_Zaman_Serisi.png`, `Fig2_Yuk_Adimi_Zoom.png`,
 `Fig3_Frekans_Histogram.png`, `Fig4_Enerji_SOC.png`, `Fig5_Kalkan_Seridi.png`,
