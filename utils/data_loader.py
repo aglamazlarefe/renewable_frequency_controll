@@ -1,38 +1,44 @@
-import pandas as pd
-import numpy as np
+"""EPİAŞ rüzgâr verisi yükleyici (SPEC §3.1).
 
-def load_epias_wind_data(filepath="data/epias_wind_data.csv", max_steps=1000):
-    """
-    EPİAŞ CSV verisini okur, Türkçe sayı formatını düzeltir ve normalize eder.
-    """
-    try:
-        # EPİAŞ verilerinde ayraç noktalı virgül (;), ondalık virgül (,), binlik ayracı nokta (.)
-        df = pd.read_csv(filepath, sep=';', decimal=',', thousands='.')
-        
-        # Sütun adı yüklenen CSV dosyası ile birebir eşleştirildi
-        wind_column = 'Rüzgar' 
-        
-        # Sadece rüzgar verisini al ve boşlukları (NaN) temizle
-        wind_power = df[wind_column].dropna().values
-        
-        # Veriyi Normalize Et (0 ile 1 arasına çek)
-        max_power = np.max(wind_power)
-        
-        # 0'a bölme hatasını engellemek için güvenlik kontrolü (DRL algoritmalarında nan değerleri engeller)
-        if max_power == 0:
-            return np.zeros(max_steps)
-            
-        normalized_wind = wind_power / max_power
-        
-        # Simülasyon adımlarına göre interpolasyon uygula
-        x_original = np.linspace(0, 1, len(normalized_wind))
-        x_target = np.linspace(0, 1, max_steps)
-        interpolated_wind = np.interp(x_target, x_original, normalized_wind)
-        
-        return interpolated_wind
-        
-    except Exception as e:
-        print(f"Hata oluştu: {e}")
-        print("CSV dosyasının yolunu ve sütun adını kontrol et.")
-        # Hata anında sistemin çökmesini engellemek için sıfır dizisi döndür
-        return np.zeros(max_steps)
+Saatlik rüzgâr üretimini okur ve en büyük değere bölerek [0, 1] aralığına getirir.
+Hatalar yutulmaz: dosya yoksa FileNotFoundError, sütun yoksa veya veri boşsa ValueError.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+from config import DEFAULT_DATA_PATH, WIND_COLUMN
+
+
+def load_wind_levels(path: str | Path = DEFAULT_DATA_PATH) -> np.ndarray:
+    """Saatlik rüzgâr seviyelerini döndürür (float64, en büyük değere bölünmüş)."""
+    path = Path(path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Rüzgâr veri dosyası bulunamadı: {path}")
+
+    # EPİAŞ biçimi: ayraç ';', ondalık ',', binlik '.'
+    df = pd.read_csv(path, sep=";", decimal=",", thousands=".")
+    if WIND_COLUMN not in df.columns:
+        raise ValueError(f"'{WIND_COLUMN}' sütunu yok; mevcut sütunlar: {list(df.columns)}")
+
+    values = pd.to_numeric(df[WIND_COLUMN], errors="raise").dropna().to_numpy(dtype=np.float64)
+    if values.size == 0:
+        raise ValueError(f"'{WIND_COLUMN}' sütununda geçerli veri yok: {path}")
+
+    peak = float(values.max())
+    if peak <= 0.0:
+        raise ValueError("Rüzgâr verisinin en büyük değeri pozitif değil; normalize edilemez.")
+    return values / peak
+
+
+def split_wind_levels(levels: np.ndarray, train_frac: float = 0.7) -> tuple[np.ndarray, np.ndarray]:
+    """Kronolojik bölme: ilk int(train_frac·n) eğitim, kalanı test."""
+    if not 0.0 < train_frac < 1.0:
+        raise ValueError(f"train_frac (0, 1) aralığında olmalı: {train_frac}")
+    levels = np.asarray(levels)
+    n_train = int(train_frac * len(levels))
+    return levels[:n_train], levels[n_train:]

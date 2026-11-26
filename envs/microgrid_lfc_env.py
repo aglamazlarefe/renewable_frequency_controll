@@ -1,148 +1,149 @@
+"""Mikro şebeke yük-frekans kontrolü Gymnasium ortamı (SPEC §3.4, §4, §6)."""
+
+from __future__ import annotations
+
 import gymnasium as gym
-from gymnasium import spaces
 import numpy as np
-from utils.Data_loader import load_epias_wind_data
+from gymnasium import spaces
+
+from config import BessParams, GridParams, ObsScales, RewardWeights, Scenario
+from envs.dynamics import build_discrete_model
+
+# Gözlem uzayının normalizasyon sınırı (SPEC §4: bileşenler [-1, 1]'e kırpılır)
+_OBS_LIMIT = 1.0
+# SOC sapması SPEC §4/§6'da 0.5'e bölünür (SOC ∈ [0,1] aralığının yarı genişliği)
+_SOC_HALF_RANGE = 0.5
+_SECONDS_PER_HOUR = 3600.0
+
 
 class MicrogridLFCEnv(gym.Env):
-    def __init__(self, data_path="data/epias_wind_data.csv", max_steps=1000):
-        super(MicrogridLFCEnv, self).__init__()
+    """BESS güç komutuyla frekans düzenleme ortamı."""
 
-        # ── Fiziksel Sabitler ──────────────────────────────────────
-        self.M     = 4.0   
-        self.D     = 0.8   
-        self.dt    = 0.1
-        self.K_vir = 0.5
+    metadata = {"render_modes": []}
 
-        self.max_steps         = max_steps
-        self.current_step      = 0
-        self.base_load_default = 0.6
+    def __init__(self, scenario_generator=None, grid: GridParams = GridParams(),
+                 bess: BessParams = BessParams(), reward: RewardWeights = RewardWeights(),
+                 obs_scales: ObsScales = ObsScales()):
+        super().__init__()
+        self.scenario_generator = scenario_generator
+        self.grid = grid
+        self.bess = bess
+        self.reward_weights = reward
+        self.obs_scales = obs_scales
+        self.dt = grid.dt
 
-        self.wind_profile = load_epias_wind_data(data_path, self.max_steps)
+        self._ad, self._bd = build_discrete_model(grid, bess)
 
-        # Gözlem: [delta_f_norm, wind_power, prev_p_ess]
-        self.observation_space = spaces.Box(
-            low=np.array([-1.0, -1.0, -1.0], dtype=np.float32),
-            high=np.array([ 1.0,  1.0,  1.0], dtype=np.float32),
-            dtype=np.float32
-        )
-        self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(1,), dtype=np.float32
-        )
+        self.action_space = spaces.Box(-1.0, 1.0, (1,), dtype=np.float32)
+        self.observation_space = spaces.Box(-_OBS_LIMIT, _OBS_LIMIT, (5,), dtype=np.float32)
 
-        self.delta_f      = 0.0
-        self.prev_delta_f = 0.0
-        self.prev_p_ess   = 0.0
-        self.base_load    = self.base_load_default
+        self.scenario: Scenario | None = None
+        self.n_steps = 0
+        self.step_count = 0
+        self.delta_f_hz = 0.0
+        self.rocof_hz_s = 0.0
+        self.p_ess = 0.0
+        self.u_ess = 0.0
+        self.soc = bess.soc_ref
+        self._x = np.zeros(5)
+        self._integral = 0.0
+        self._d_net = np.zeros(0)
+        self._sum_f2 = 0.0
+        self._throughput = 0.0
 
-        # PI Kalkan parametreleri
-        self.KP_PI       = 20.0
-        self.KI_PI       = 8.0
-        self.pi_integral = 0.0
-        self.SHIELD_THR  = 0.15  # Hz
+    # ── yardımcılar ────────────────────────────────────────────────
+    def _obs(self) -> np.ndarray:
+        s = self.obs_scales
+        raw = np.array([
+            self.delta_f_hz / s.f_hz,
+            self.rocof_hz_s / s.rocof_hz_s,
+            self._integral / s.int_hz_s,
+            self.p_ess / self.bess.p_max,
+            (self.soc - self.bess.soc_ref) / _SOC_HALF_RANGE,
+        ])
+        return np.clip(raw, -_OBS_LIMIT, _OBS_LIMIT).astype(np.float32)
 
-        self._ep_f_sq_sum     = 0.0
-        self._ep_jitter       = 0.0
-        self._ep_shield_steps = 0
+    def _info(self, d_net: float) -> dict:
+        return {
+            "delta_f_hz": float(self.delta_f_hz),
+            "rocof_hz_s": float(self.rocof_hz_s),
+            "p_ess": float(self.p_ess),
+            "u_ess": float(self.u_ess),
+            "soc": float(self.soc),
+            "p_diesel": float(self._x[2]),
+            "d_net": float(d_net),
+            "shield_active": False,
+        }
 
-    def reset(self, seed=None, options=None):
+    # ── Gymnasium arayüzü ──────────────────────────────────────────
+    def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        self.current_step = 0
-        self.delta_f      = 0.0
-        self.prev_delta_f = 0.0
-        self.prev_p_ess   = 0.0
-        self.pi_integral  = 0.0
-        self.base_load    = self.base_load_default + np.random.uniform(-0.05, 0.05)
-
-        self._ep_f_sq_sum     = 0.0
-        self._ep_jitter       = 0.0
-        self._ep_shield_steps = 0
-
-        return self._get_obs(), {}
+        scenario = options.get("scenario") if options else None
+        if scenario is None:
+            if self.scenario_generator is None:
+                from envs.scenarios import default_generator  # tembel içe aktarma
+                self.scenario_generator = default_generator("train")
+            scenario = self.scenario_generator.sample(self.np_random)
+        self.scenario = scenario
+        self.n_steps = scenario.n_steps
+        self._d_net = np.asarray(scenario.d_net, dtype=float)
+        self.step_count = 0
+        self._x = np.zeros(5)
+        self.delta_f_hz = 0.0
+        self.rocof_hz_s = 0.0
+        self.p_ess = 0.0
+        self.u_ess = 0.0
+        self.soc = float(scenario.soc0)
+        self._integral = 0.0
+        self._sum_f2 = 0.0
+        self._throughput = 0.0
+        return self._obs(), self._info(0.0)
 
     def step(self, action):
-        raw_p_ess = float(action[0])
+        bess, grid = self.bess, self.grid
+        a = float(np.clip(np.asarray(action, dtype=float).reshape(-1)[0], -1.0, 1.0))
+        u_prev = self.u_ess
+        u_target = a * bess.p_max
+        max_delta = bess.ramp_rate * self.dt
+        u = u_prev + float(np.clip(u_target - u_prev, -max_delta, max_delta))
+        if self.soc <= bess.soc_min:
+            u = min(u, 0.0)
+        if self.soc >= bess.soc_max:
+            u = max(u, 0.0)
 
-        # 1) SLEW RATE — 0.015 yetersizdi, 0.025'e çıkarıldı (Çeviklik artırıldı)
-        diff  = raw_p_ess - self.prev_p_ess
-        p_cmd = self.prev_p_ess + np.clip(diff, -0.025, 0.025)
-        p_cmd = float(np.clip(p_cmd, -1.0, 1.0))
+        d_k = float(self._d_net[self.step_count])
+        self._x = self._ad @ self._x + self._bd @ np.array([u, d_k])
 
-        # 2) SAFETY SHIELD
-        shield_active = False
-        if abs(self.delta_f) > self.SHIELD_THR:
-            shield_active = True
-            self._ep_shield_steps += 1
-            error             = -self.delta_f
-            self.pi_integral += error * self.dt
-            self.pi_integral  = np.clip(self.pi_integral, -0.5, 0.5)
-            p_ess = float(np.clip(
-                self.KP_PI * error + self.KI_PI * self.pi_integral, -1.0, 1.0
-            ))
+        prev_f = self.delta_f_hz
+        self.delta_f_hz = float(self._x[0] * grid.f0_hz)
+        self.rocof_hz_s = (self.delta_f_hz - prev_f) / self.dt
+        self.p_ess = float(self._x[4])
+        self.u_ess = float(u)
+        lim = self.obs_scales.int_hz_s
+        self._integral = float(np.clip(self._integral + self.delta_f_hz * self.dt, -lim, lim))
+
+        # SOC güncellemesi: adım sonu P_ess, tek yön verim
+        e_mwh = self.p_ess * grid.s_base_mw * self.dt / _SECONDS_PER_HOUR
+        if e_mwh >= 0.0:
+            self.soc -= e_mwh / (bess.eta * bess.e_mwh)
         else:
-            p_ess = p_cmd
-            # Bumpless transfer: AI devralırken integral yavaşça söner
-            self.pi_integral *= 0.90 
+            self.soc -= e_mwh * bess.eta / bess.e_mwh
+        self.soc = float(np.clip(self.soc, 0.0, 1.0))
 
-        # 3) Rüzgâr ve yük
-        step_idx  = min(self.current_step, self.max_steps - 1)
-        p_wind    = float(self.wind_profile[step_idx])
-        p_load    = self.base_load + np.random.normal(0, 0.002)
+        w = self.reward_weights
+        ef = self.delta_f_hz / w.f_ref_hz
+        eu = self.p_ess / bess.p_max
+        ej = (self.u_ess - u_prev) / bess.p_max
+        es = (self.soc - bess.soc_ref) / _SOC_HALF_RANGE
+        reward = float(-(w.w_f * ef ** 2 + w.w_u * eu ** 2 + w.w_j * ej ** 2 + w.w_soc * es ** 2))
 
-        # 4) Swing denklemi
-        df_dt     = (self.delta_f - self.prev_delta_f) / self.dt
-        p_virtual = -self.K_vir * df_dt
-        delta_p   = (p_wind + p_ess + p_virtual) - p_load
+        self.step_count += 1
+        self._sum_f2 += self.delta_f_hz ** 2
+        self._throughput += abs(self.p_ess) * self.dt
+        truncated = bool(self.step_count >= self.n_steps)
 
-        self.prev_delta_f = self.delta_f
-        self.delta_f = float(np.clip(
-            self.delta_f + ((delta_p - self.D * self.delta_f) / self.M) * self.dt,
-            -0.5, 0.5
-        ))
-
-        # 5) ÖDÜL DENGESİ (REVISED)
-        # Bonus: Otonomiye ciddi puan ver
-        bonus     = 5.0 if not shield_active else -2.0
-        
-        # Frekans Cezası: 25.0 -> 120.0 (Ajan frekans hatasını ciddiye almalı)
-        f_penalty = 120.0 * (self.delta_f ** 2)
-        
-        # Enerji Cezası: Düşürüldü, ajan bataryayı kullanmaktan korkmamalı
-        e_penalty = 5.0 * (p_ess ** 2)
-        
-        # Jitter Cezası: Shield aktifse ceza kesilmez (Ajanın suçu değil)
-        # Slew rate arttığı için katsayı 500 -> 350 yapıldı
-        j_penalty = 350.0 * (p_ess - self.prev_p_ess) ** 2 if not shield_active else 0.0
-        
-        barrier   = 400.0 * max(0, abs(self.delta_f) - 0.11) ** 2
-
-        total_reward = bonus - (f_penalty + e_penalty + j_penalty + barrier)
-
-        # 6) Metrik güncelle
-        self._ep_f_sq_sum += self.delta_f ** 2
-        self._ep_jitter   += abs(p_ess - self.prev_p_ess)
-        self.prev_p_ess    = p_ess
-        self.current_step += 1
-        terminated = bool(self.current_step >= self.max_steps)
-
-        info = {
-            "p_ess":         p_ess,
-            "delta_f":       self.delta_f,
-            "shield_active": shield_active,
-        }
-        if terminated:
-            n = max(self.current_step, 1)
-            info["ep_rmse_f"]     = float(np.sqrt(self._ep_f_sq_sum / n))
-            info["ep_jitter"]     = float(self._ep_jitter)
-            info["ep_autonomy"]   = 1.0 - self._ep_shield_steps / n
-
-        return self._get_obs(), total_reward, terminated, False, info
-
-    def _get_obs(self):
-        step_idx     = min(self.current_step, self.max_steps - 1)
-        # Ölçekleme: Ajan küçük sapmaları (20-30 mHz) daha net görsün
-        delta_f_norm = float(np.clip(self.delta_f / 0.2, -1.0, 1.0))
-        return np.array([
-            delta_f_norm,
-            float(self.wind_profile[step_idx]),
-            float(self.prev_p_ess)
-        ], dtype=np.float32)
+        info = self._info(d_k)
+        if truncated:
+            info["ep_rmse_hz"] = float(np.sqrt(self._sum_f2 / self.step_count))
+            info["ep_throughput_pu_s"] = float(self._throughput)
+        return self._obs(), reward, False, truncated, info

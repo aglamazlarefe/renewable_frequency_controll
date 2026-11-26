@@ -68,7 +68,9 @@ class BessParams:
 @dataclass(frozen=True)
 class ShieldParams:
     """PI güvenlik kalkanı (histerezisli)."""
-    engage_hz: float = 0.15     # |Δf| bu değeri AŞINCA kalkan devreye girer
+    engage_hz: float = 0.20     # |Δf| bu değeri AŞINCA kalkan devreye girer
+                                # (ENTSO-E azami kalıcı sapma; varsayılan PI/PID'in en kötü değerinin üstünde,
+                                #  bkz. docs/MODEL_VALIDATION.md §4)
     release_hz: float = 0.10    # |Δf| bu değerin ALTINA inince kalkan bırakır
     kp: float = 5.0             # [normalize aksiyon / Hz]
     ki: float = 2.0             # [normalize aksiyon / (Hz·s)]
@@ -158,7 +160,7 @@ class Scenario:
     # meta anahtarları (üretici doldurur):
     #   "load_steps": list[tuple[int, float]]  → (adım indeksi, büyüklük pu)
     #   "wind_ramp" : tuple[int, int, float] | None → (başlangıç, bitiş, büyüklük pu)
-    #   "hour_index": int, "seed": int
+    #   "hour_index": int, "bank_index": int (yalnızca make_scenario_bank)
 
     @property
     def n_steps(self) -> int:

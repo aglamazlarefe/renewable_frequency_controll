@@ -112,6 +112,7 @@ class ShieldedEnv(gym.Wrapper):
 - Darbesiz geçiş: devreye girişte `I`, PI çıkışı o anki `u_ess / p_max`'a eşit olacak şekilde başlatılır.
 - PI çıkışı ortamın aynı hız/güç/SOC sınırlarından geçer (wrapper yalnızca aksiyonu değiştirir).
 - `info["shield_active"]` (bool) her adımda yazılır; aktifken ödülden `params.penalty` düşülür.
+  Cezasız görev ödülü `info["reward_task"]` olarak da yazılır.
 - Bölüm sonunda `info["ep_autonomy"]` ∈ [0, 1] (kalkanın pasif olduğu adım oranı).
 - `reset()` kalkan durumunu sıfırlar.
 
@@ -137,7 +138,9 @@ def run_episode(env: gym.Env, controller: Controller, scenario: Scenario, seed: 
 `env.reset(seed=seed, options={"scenario": scenario})`, sonra bölüm bitene kadar adımlar.
 Her adımda `controller.act(obs, info)` çağrılır (ilk adımda `reset`'in döndürdükleriyle); bölüm başında `controller.reset()`.
 Dönen sözlük (hepsi uzunluk `n_steps`; `k`. eleman `k`. adımın **sonucu**): `t = (k+1)·dt` [s], `delta_f_hz`, `p_ess`, `u_ess`, `soc`, `p_diesel`,
-`d_net`, `shield_active` (bool), `reward`.
+`d_net`, `shield_active` (bool), `reward`. `reward` **görev ödülüdür**: `info["reward_task"]` varsa o
+(kalkan cezası hariç), yoksa adımın ödülü. Böylece `mean_cost` tüm kontrolcülerde aynı büyüklüktür;
+kalkan etkinliği ayrıca `autonomy_pct` ile raporlanır.
 
 ### 3.8 `utils/metrics.py`
 ```python
@@ -184,12 +187,12 @@ def train(algo: str, seed: int, total_steps: int, out_dir: str | Path = "models"
 ```python
 def tune(n_trials: int = 150, n_scenarios: int = 20, seed: int = 0,
          out_path: str | Path = "results/baseline_gains.json") -> dict
-def pareto_sweep(n_scenarios: int = 20, seed: int = 0,
+def pareto_sweep(n_scenarios: int = EvalParams.n_scenarios, seed: int = EvalParams.seed,
                  out_path: str | Path = "results/pareto_pi.json") -> list[dict]
 ```
 - Senaryolar **eğitim** bölmesinden; amaç = bölüm ortalaması `−reward` (RL ile aynı maliyet).
 - `baseline_gains.json`: `{"droop_k", "pi_kp", "pi_ki", "pid_kp", "pid_ki", "pid_kd"}`.
-- `pareto_pi.json`: PI kazanç ızgarası için **test** bankasında `{kp, ki, rmse_mhz, bess_throughput_kwh}` listesi.
+- `pareto_pi.json`: PI kazanç ızgarası için, varsayılan olarak `evaluate.py` ile **aynı test bankasında** `{kp, ki, rmse_mhz, bess_throughput_kwh}` listesi.
 
 ### 3.12 `evaluate.py`
 ```python
