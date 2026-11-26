@@ -1,0 +1,90 @@
+
+=================================================================
+  TD3 Safe-AI vs Geleneksel PI — 15 Trial Ortalamasi
+=================================================================
+
+Model yukleniyor...
+  [OK] TD3 modeli yuklendi.
+
+  Trial 1/15  (seed=2024)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 2/15  (seed=2025)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 3/15  (seed=2026)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 4/15  (seed=2027)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 5/15  (seed=2028)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 6/15  (seed=2029)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 7/15  (seed=2030)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 8/15  (seed=2031)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 9/15  (seed=2032)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 10/15  (seed=2033)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 11/15  (seed=2034)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 12/15  (seed=2035)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 13/15  (seed=2036)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 14/15  (seed=2037)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+  Trial 15/15  (seed=2038)
+    [PI] 1000 adim tamamlandi.
+    [TD3] 1000 adim tamamlandi.
+    [TD3-log] 1000 adim tamamlandi.
+
+
+===========================================================================
+  15 TRIAL ORTALAMASI — PERFORMANS ANALİZİ  (Ort ± Std)
+===========================================================================
+  Metrik                            |          Geleneksel PI | TD3 Safe-AI (Onerilen)
+  -------------------------------------------------------------------------
+  Frekans RMSE (mHz)                |           50.83 ± 0.33 |           66.24 ± 2.61
+  Maksimum Sapma (mHz)              |          112.35 ± 0.23 |          140.73 ± 5.71
+  Frekans Nadiri (mHz)              |         -112.35 ± 0.23 |         -140.73 ± 5.71
+  Kontrol Eforu (MWh)               |      0.06066 ± 0.00361 |      0.05551 ± 0.00369
+  Sinyal Jitter                     |            9.33 ± 0.11 |           19.99 ± 0.49
+  Otonomi Orani (%)                 |              0.0 ± 0.0 |             87.8 ± 3.6
+  Guvenlik Ihlali                   |              0.0 ± 0.0 |              0.0 ± 0.0
+  Bant |Df|<50mHz (%)               |             61.9 ± 1.7 |             48.7 ± 3.4
+  Bant |Df|<100mHz (%)              |             97.9 ± 1.2 |             87.8 ± 3.6
+  Bant |Df|<150mHz (%)              |            100.0 ± 0.0 |            100.0 ± 0.0
+  ROCOF Maksimum (Hz/s)             |        0.1054 ± 0.0008 |        0.1072 ± 0.0118
+  ROCOF Ortalama (Hz/s)             |        0.0278 ± 0.0002 |        0.0217 ± 0.0012
+  Toparlanma Suresi (s)             |              4.7 ± 0.2 |             14.9 ± 6.0
+  -------------------------------------------------------------------------
+  Enerji Tasarrufu        : %8.50  (0.00516 MWh/ep)
+  Engellenen CO2          : 2.0625 kg
+  AI / PI adim (seed=2024): 865 / 135
+===========================================================================
+
+[Grafik 1] Fig1_Ana_Karsilastirma.png
+[Grafik 2] Fig2_Yuk_Darbesi_Zoom.png
+[Grafik 3] Fig3_Frekans_Histogram.png
+[Grafik 4] Fig4_Kumulatif_Enerji.png
+[Grafik 5] Fig5_Shield_ROCOF.png
+[Grafik 6] Fig6_Ozet_Tablo.png
+
+ Tum grafikler 'figures/' klasorune kaydedildi.
+=================================================================
+
