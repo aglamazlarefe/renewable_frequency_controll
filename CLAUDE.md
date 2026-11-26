@@ -42,7 +42,7 @@ Komutlar proje kökünden çalıştırılır. Bash'te Türkçe çıktı için `P
 - **Tekrarlanabilirlik:** `results/results.json` içinde zaman damgası, süre, mutlak yol bulunmaz.
 - README'deki sonuç sayıları elle yazılmaz; `python evaluate.py --update-readme` üretir.
 - Yorumlar ve grafik metinleri Türkçe; tanımlayıcılar İngilizce.
-- Eski `models/td3_microgrid_model*.zip` ve `models/checkpoints/` yeni gözlem uzayıyla uyumsuzdur; dokunmayın, kullanmayın.
+- Eski sürümün modelleri ve günlükleri depodan kaldırıldı (yeni gözlem uzayıyla uyumsuz); geri getirme: `docs/LEGACY.md`.
 
 ## Git
 
