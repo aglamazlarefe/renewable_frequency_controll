@@ -50,9 +50,10 @@ Sonuçlar: `C:\Users\aglamazlarefe\claude2\config\projects\D--RW-FC\507f25e3-4c6
 
 ## 3. Sıradaki adımlar (sırayla)
 
-1. **Ayar sonucunu kontrol et** (`logs/runs/tune2.log`): hiçbir kazanç `tune_baselines.py::SearchSpace` sınırına
-   dayanmamalı. 1. tur (`ki ≤ 5`) sonucu `logs/runs/baseline_gains_ki5.json`'da: PID `ki=4,998` sınıra dayanmıştı.
-   Yine dayanırsa aralığı genişletip `PY tune_baselines.py` yeniden çalıştırın.
+1. ~~Ayar sonucunu kontrol et~~ **TAMAM (10:55).** 2. tur (`ki ≤ 20`) sonucu `results/baseline_gains.json`, hiçbir kazanç
+   sınırda değil. Eğitim bankası maliyeti (düşük iyi): Droop 0,0204 (k=6,61) · PI 0,0116 (kp=5,11, ki=4,20) ·
+   PID **0,0066** (kp=4,48, ki=14,06, kd=0,39). 1. turda PID ki=4,998'de sınıra dayanmış, maliyet 0,0078'di
+   (`logs/runs/baseline_gains_ki5.json`). Bölüm başına karşılığı (1500 adım): PI ≈ −17,4, PID ≈ −9,9.
 2. **Eğitimler bitince:** `bash scripts/finish_pipeline.sh` — modelleri bekler, `evaluate.py --update-readme`
    çalıştırır, `check_goal.py` ile denetler. (~5–10 dk)
 3. **Şekillere bakın** (`figures/Fig1…Fig7`, Read aracıyla): okunaklı mı, etiketler çakışıyor mu?
@@ -65,6 +66,31 @@ Sonuçlar: `C:\Users\aglamazlarefe\claude2\config\projects\D--RW-FC\507f25e3-4c6
 
 **Git yetkisi (kullanıcı, 2026-11-27):** commit, push ve PR birleştirme **onay almadan** yapılabilir.
 Birleştirme yalnızca doğrulanmış durumda: testler yeşil ve `check_goal.py` "HEDEF TAMAM".
+
+## 3b. Hakem incelemesinden kalan işler (wf_c2f2bea6-c84, öncelik sırasıyla)
+
+Ek iş akışı tamamlandı: `scripts/plot_learning_curves.py`, `scripts/robustness.py`, 3 ek test dosyası eklendi (88 hızlı test
+geçiyor). Ek testlerin bulduğu `utils/report.py` `|` hatası düzeltildi. README'ye "İddia kapsamı" bölümü ve hakemlerin
+sınırlılıkları eklendi; `docs/MODEL_VALIDATION.md` düzeltildi. **Henüz yapılmayanlar:**
+
+1. **Eğitimler bitince bu turun çıktıları** (§3 adım 2'den sonra):
+   `PY scripts/plot_learning_curves.py` (Şekil 8), `PY scripts/robustness.py --n-scenarios 20` (Şekil 9); README
+   şekil tablosuna ve kısa bir "Dayanıklılık" bölümüne ekleyin. Not: öğrenme eğrilerinde özerklik ~20k adımdan sonra %100'e
+   oturuyor → kalkan eğitilmiş ajanda nadiren devreye giriyor; yorumda belirtin.
+2. **Kalkan tasarım kusuru (doğrulandı):** darbesiz geçiş PI'ı ajanın komutundan başlatıyor; yanlış işaretli ajanla
+   0,10 pu adımda −724 mHz (bataryasız −466). Düzeltme önerisi: devreye girişte integrali sıfırla (PI hemen `kp·e` verir;
+   hız sınırı 2 pu/s ile 2 adımda tam ters güce dönebilir) ve "yanlış işaretli ajanla shielded max|Δf| < NoBESS max|Δf|"
+   testi ekle. **Bu değişiklik ortamın kalkanını değiştirir → tüm RL modelleri yeniden eğitilmeli (~1,5 saat).** Kullanıcıya
+   sonuçları gösterdikten sonra bir sonraki tur olarak yapın; bu turda README sınırlılığı olarak yazıldı.
+3. **İstatistik (doğrulandı, orta):** `evaluate.py`'ye (a) tohum bazlı eşleştirilmiş Wilcoxon + tohumlar arası min/max,
+   (b) RL güven aralıkları için iki düzeyli bootstrap (önce tohum, sonra senaryo), (c) birincil metrikler
+   (`mean_cost`, `rmse_mhz`) için Holm düzeltmesi, (d) eşleştirilmiş fark için bootstrap güven aralığı. `results.json`
+   biçimine ek anahtar olarak; kabul testleri mevcut anahtarları denetler, eklemeler onları bozmaz.
+4. **Orta/düşük:** kalkanlı ayarlı PI referansı (`PI+Shield`) — kalkanın katkısını ajandan ayırır; kalkansız TD3 için
+   3 tohum; kalkan eşiği duyarlılığı (150/200/250 mHz, robustness.py'ye bir durum olarak); ölçüm gürültüsü durumu;
+   AGC boşaltma teriminin ablasyonu (K_agc = 0,01–0,02 ve terimsiz); yerleşme süresinde yerleşmeyen oranı da raporla
+   (şu an NaN'ler düşülüyor → başarısız kontrolcüyü kayırır); rüzgâr normalizasyonunu eğitim maksimumuyla yap
+   (kabul testi tüm seri maksimumunu sabitliyor — değiştirmeden önce kullanıcıya sorun).
 
 ## 4. Verilmiş kararlar (yeniden tartışmayın)
 

@@ -89,8 +89,12 @@ Kalkan devredeyken frekansi yalnizca kismen toparlar (nadir -359 mHz @ 0.10 pu),
 sonra devreye girer; bu bir "son care" sigortasidir, performans kontrolcusu degil.
 
 **Kararli kazanc araliklari (0.10 pu adim, son 20 s'de |df| < 50 mHz).**
-Droop kp 1..9, PI kp 1..8 (ki=2). kp >= 9-10 civarinda `ramp_rate` sinirli limit cevrim baslar
-(son penceredeki genlik 185 mHz); bu config.py'deki `BessParams.ramp_rate` aciklamasiyla uyumludur.
+Droop kp 1..9, PI kp 1..8 (ki=2). kp >= 9-10 civarinda limit cevrim baslar (son penceredeki genlik 185 mHz).
+**Duzeltme (hakem incelemesi):** 2 pu/s'de `ramp_rate*dt = 0,2 pu = p_max` oldugundan hiz siniri pratikte baglayici
+degildir; bu kalan limit cevrimin nedeni p_max doyumu ile ornekleme gecikmesidir (dt = T_ess = 0,1 s). Hiz siniri
+0,4 pu/s iken ise orta kazancli PI'da da limit cevrim olusuyordu (orkestrator prototipi); 2 pu/s'ye cikarmanin nedeni
+budur. Fiziksel gerekce: sebeke olcekli BESS eviricileri tam guce 100–200 ms'de cikabilir (hizli frekans tepkisi
+urunleri <= 1 s ister), bu nedenle 2 MW'a 0,1 s'de ulasmak gercekcidir.
 Tarama kaba (tam sayi adimlar) oldugundan sinir +-1 belirsizdir.
 `tune_baselines.py` onerisi: `droop_k` in [0.5, 9], `pi_kp` in [0.5, 8], `pid_kp` in [0.5, 8]; `pi_ki`/`pid_ki`
 icin bu taramada ki=2 sabit tutuldu, aralik [0.1, 5] makul bir baslangictir ve dogrulanmamistir;
@@ -109,7 +113,12 @@ Bu asamada `config.py` degistirilmedi, karar orkestratore birakilir.
 
 ## 4. Orkestrator karari: kalkan esigi 150 -> 200 mHz
 
-Test bolmesinde (40 senaryo, tohum 20240) ve egitim bolmesinde (40 senaryo) varsayilan kazanclarla olculen en kotu sapma:
+Karar **egitim bolmesine** dayanir (§3 ve asagidaki egitim satirlari): varsayilan PI'in en kotu sapmasi 182 mHz, PID'inki
+155 mHz; 200 mHz ikisinin de ustundedir. Test satirlari yalnizca **dogrulama** amaciyla eklenmistir ve karari degistirmez
+(hakem incelemesi, test bankasinin karar metninde kullanilmasini usul hatasi olarak not etti). ENTSO-E 200 mHz degeri
+kita senkron alani icindir; 10 MW'lik ada sebekesi icin yalnizca bir referans buyukluk olarak alinmistir.
+
+Varsayilan kazanclarla olculen en kotu sapma:
 
 | Bolme | Kontrolcu | medyan max abs df | q90 | en buyuk | >150 mHz | >200 mHz |
 |---|---|---|---|---|---|---|

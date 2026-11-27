@@ -15,7 +15,7 @@ PM = "±"
 TABLE_ROWS = (
     ("rmse_mhz", "RMSE [mHz]", 1),
     ("max_dev_mhz", "Maks. sapma [mHz]", 1),
-    ("band_100_pct", "Süre |Δf|<100 mHz [%]", 1),
+    ("band_100_pct", r"Süre \|Δf\|<100 mHz [%]", 1),  # | Markdown tablosunda kaçışlı
     ("settling_time_s", "Yerleşme süresi [s]", 1),
     ("bess_throughput_kwh", "BESS enerji geçişi [kWh]", 2),
     ("control_jitter", "Kontrol titreşimi", 1),

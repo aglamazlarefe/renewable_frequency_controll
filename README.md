@@ -38,7 +38,8 @@ dΔP_c/dt  = −K_agc · (β·Δf − P_ess),   β = D + 1/R                   d
 dP_ess/dt = (−P_ess + u) / T_ess                                     BESS dönüştürücü gecikmesi
 ```
 
-AGC'deki `−P_ess` terimi kalıcı dengesizliği dizele devreder: frekansı sıfırlayan her kontrolcüde batarya gücü de
+**Modelleme varsayımı:** AGC'deki `−P_ess` terimi standart Kundur/Bevrani AGC'si değil, bataryayı gözeten bir ACE
+tasarımıdır. Kalıcı dengesizliği dizele devreder: frekansı sıfırlayan her kontrolcüde batarya gücü de
 sıfıra döner. Böylece batarya enerjisi yalnızca geçici rejimde harcanır ve **frekans kalitesi ↔ batarya kullanımı**
 gerçek bir ödünleşim olur.
 
@@ -89,17 +90,29 @@ ayarlanır (`tune_baselines.py`). Bütün kontrolcüler aynı aktüatör sınır
 **Gözlem (5 boyut, [−1, 1]):** Δf, ROCOF, ∫Δf dt, P_ess, SOC − 0,5.
 **Ödül:** `r = −(w_f·(Δf/0,1 Hz)² + w_u·(P_ess/P_max)² + w_j·(Δu/P_max)² + w_soc·((SOC−0,5)/0,5)²)`,
 kalkan aktifken ayrıca −0,5. Metrikler bu cezayı **içermeyen** görev maliyetiyle hesaplanır; kalkan etkinliği
-ayrıca "ajan özerkliği" olarak raporlanır.
+ayrıca "ajan özerkliği" olarak raporlanır. Özerklik yalnızca kalkanlı ajanlar için anlamlıdır; klasik kontrolcüler
+kalkansız çalıştığından tanım gereği %100'dür.
 
 ---
 
 ## Değerlendirme protokolü
 
-- Test bölmesinden sabit tohumlu **40 senaryoluk banka**; her kontrolcü **birebir aynı** senaryoları çalıştırır.
+- Test bölmesinden sabit tohumlu **40 senaryoluk banka**. Bu senaryolar eğitimle **aynı üreteçten** çekilmiş,
+  görülmemiş örneklerdir; farklı bir sistem ya da mevsime genelleme kanıtı değildir (bkz. dayanıklılık testi).
+- her kontrolcü **birebir aynı** senaryoları çalıştırır.
 - RL için 3 eğitim tohumu: senaryo başına metrik tohumlar üzerinden ortalanır, tohum bazlı özet ayrıca saklanır.
 - Özet: ortalama ± standart sapma ve ortalamanın bootstrap %95 güven aralığı.
 - Karşılaştırma: RL kontrolcüsü ile PI / PID arasında senaryo bazında eşleştirilmiş Wilcoxon işaretli sıra testi
   (`results/results.json` → `comparisons`).
+
+### İddia kapsamı
+
+Güvenle söylenebilecek olan şudur: *bu sentetik üreteçte, tohum ortalaması alınmış TD3/SAC+kalkan politikası, birincil
+metriklerde (`mean_cost`, `rmse_mhz`) ayarlı PI/PID'den farklıdır ya da farklı değildir.* 3 eğitim tohumu algoritma
+düzeyinde ("RL klasik kontrolü geçer", "TD3 SAC'tan iyidir") genelleme için yetersizdir. Kalkansız TD3 ablasyonu tek
+tohumdur ve örnek niteliğindedir. Wilcoxon testi senaryo başına tohum ortalaması üzerinden yapılır, tohum varyansını
+içermez; tohum bazlı sonuçlar `results.json → per_seed` altındadır. Çok sayıda metrik test edildiğinden birincil iki
+metrik dışındaki p değerleri keşif amaçlıdır (çoklu karşılaştırma düzeltmesi uygulanmamıştır). Son checkpoint kullanılır.
 
 ## Sonuçlar
 
@@ -178,6 +191,16 @@ tests/acceptance/          kabul testleri
 - **Hiperparametreler:** RL hiperparametreleri için arama yapılmamıştır (SB3 varsayılanlarına yakın, CPU'ya uygun
   değerler); klasik kontrolcüler ise ayarlanmıştır. Bu karşılaştırma RL aleyhine bir eğilim taşıyabilir.
 - **Eğitim bütçesi:** tohum başına 150 bin adım (100 bölüm).
+- **Kalkan bir sınır garanti etmez:** darbesiz geçiş PI'ı ajanın o anki komutundan başlatır. Yanlış işaretli sabit
+  bir ajanla 0,10 pu adımda tepe sapma −724 mHz'dir (bataryasız −466 mHz, kalkansız aynı ajan −1054 mHz). Kalkan geç
+  devreye giren kısmi bir yedektir; "güvenlik" iddiası |Δf| > 200 mHz'de geçen sürenin azalmasıyla sınırlıdır.
+- **Ölçüm gürültüsü yok:** Δf ve ROCOF kusursuz ölçülür; bu, özellikle PID'in türev terimini kayırır.
+- **Bozucu türü:** senaryolarda yük adımları (0,02–0,10 pu) rüzgâr türbülansından (std ≈ 0,014 pu) baskındır; sonuçlar
+  ağırlıklı olarak bir yük adımı kıyaslamasıdır. Atalet rüzgâr payından bağımsız sabittir (H = 2 s).
+- **SOC:** 150 s'lik bölümlerde SOC %1'den az değişir ve sınırlara hiç ulaşmaz; SOC yönetimiyle ilgili bir iddia
+  bu deneylerle sınanmamıştır.
+- **Maliyet ağırlıkları:** `mean_cost` tasarımcının seçtiği ağırlıklara bağlıdır ve iki kontrolcü ailesinin de eniyilediği
+  amaçtır; ağırlık değişince sıralama değişebilir. Ağırlıktan bağımsız karşılaştırma Şekil 6'daki Pareto düzlemidir.
 
 ## Kaynaklar
 
