@@ -34,6 +34,20 @@ for d in sorted(glob.glob('logs/*_1')):
 `PY train.py --algo sac --seed 0 --steps 150000` (her eksik model için). Paralel çalıştırırken **her komutu ayrı
 satırda `&` ile başlatın**; `A && B && (C) &` biçimi tüm zinciri arka plana atar ve değişkenler kaybolur (bir kez başımıza geldi).
 
+### Ek iş akışı (ultracode, 10:40'ta başlatıldı) — `wf_c2f2bea6-c84`
+
+Yalnızca **yeni dosya** yazan sonnet ajanları; mevcut dosyalara dokunmazlar:
+
+| Paket | Yeni dosyalar | Eğitimler bitince yapılacak |
+|---|---|---|
+| Öğrenme eğrileri | `scripts/plot_learning_curves.py` | `PY scripts/plot_learning_curves.py` → `figures/Fig8_Ogrenme_Egrileri.png`, `results/learning_curves.json`; README şekil tablosuna ekle |
+| Dayanıklılık | `scripts/robustness.py`, `tests/test_robustness_smoke.py` | `PY scripts/robustness.py` → `results/robustness.json`, `figures/Fig9_Dayaniklilik.png`; README'ye kısa bölüm |
+| Ek testler | `tests/test_extra_physics.py`, `tests/test_extra_components.py` | `xfail(strict=True, reason="BUG: …")` işaretli test varsa = gerçek hata; düzeltip işareti kaldır |
+| Hakemler (fizik/kontrol, istatistik/protokol) + çürütme doğrulaması | dosya yok, yalnızca rapor | doğrulanmış (`verdict.refuted == false`) bulguları değerlendir/düzelt |
+
+Sonuçlar: `C:\Users\aglamazlarefe\claude2\config\projects\D--RW-FC\507f25e3-4c64-418c-86b4-e9e6e0ade4b3\subagents\workflows\wf_c2f2bea6-c84\journal.jsonl`
+(her ajan için bir `{"type":"result",...}` satırı). Yeni dosyaları gözden geçirip `PY -m pytest -q -m "not slow"` ile denedikten sonra commit'leyin.
+
 ## 3. Sıradaki adımlar (sırayla)
 
 1. **Ayar sonucunu kontrol et** (`logs/runs/tune2.log`): hiçbir kazanç `tune_baselines.py::SearchSpace` sınırına
