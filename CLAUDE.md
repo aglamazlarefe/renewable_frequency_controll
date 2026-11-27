@@ -47,5 +47,6 @@ Komutlar proje kökünden çalıştırılır. Bash'te Türkçe çıktı için `P
 
 ## Git
 
-Çalışma dalı `physical-model`. Yerel commit serbest; **`git push` yapmayın** (kullanıcı isteyene kadar).
+Çalışma dalı `physical-model`, PR #1 (taslak). Kullanıcı commit, push ve PR birleştirmeyi **onaysız** yapmaya izin verdi;
+birleştirme yalnızca testler yeşil ve `scripts/check_goal.py` "HEDEF TAMAM" iken. `main`'e force-push yok.
 `results/before_refactor.txt`: yeniden yazımdan önceki kodun gerçek çıktısı (README'deki eski rakamlarla uyuşmaz) — referans olarak saklanır.

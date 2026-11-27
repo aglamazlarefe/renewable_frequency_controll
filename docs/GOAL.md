@@ -37,4 +37,4 @@ bir test yanlışsa gerekçesini yaz ve dur. docs/SPEC.md sözleşmedir, docs/TA
 
 - GPU eğitimi (her şey CPU'da çalışır).
 - RL hiperparametreleri için tam Optuna araması.
-- Uzak depoya `git push` (kullanıcı isteyene kadar yapılmaz).
+- `main`'e force-push. (Commit, push ve PR #1'i birleştirme kullanıcı onayıyla serbest; birleştirme hedef tamamlanınca.)

@@ -58,7 +58,13 @@ Sonuçlar: `C:\Users\aglamazlarefe\claude2\config\projects\D--RW-FC\507f25e3-4c6
 3. **Şekillere bakın** (`figures/Fig1…Fig7`, Read aracıyla): okunaklı mı, etiketler çakışıyor mu?
 4. **README'deki `<!-- YORUM -->` satırını** gerçek sonuç yorumuyla değiştirin (aşağıdaki §5 kurallarına göre).
    Tablo otomatik gelir; elle sayı yazmayın, yorumdaki sayılar tablodan/`results.json`'dan alınmalı.
-5. `PY scripts/check_goal.py` → "HEDEF TAMAM". Sonra commit (push YOK, kullanıcı istemedikçe).
+5. `PY scripts/check_goal.py` → "HEDEF TAMAM". Sonra commit + push.
+6. **PR'ı bitir:** taslak PR #1 (https://github.com/aglamazlarefe/renewable_frequency_controll/pull/1).
+   PR açıklamasındaki test planı kutularını işaretle (`gh pr edit 1 --body-file …`), sonuç özetini ekle, sonra
+   `gh pr ready 1` ve `gh pr merge 1 --merge` (squash değil; commit geçmişi korunur). `main`'e force-push yok.
+
+**Git yetkisi (kullanıcı, 2026-11-27):** commit, push ve PR birleştirme **onay almadan** yapılabilir.
+Birleştirme yalnızca doğrulanmış durumda: testler yeşil ve `check_goal.py` "HEDEF TAMAM".
 
 ## 4. Verilmiş kararlar (yeniden tartışmayın)
 
@@ -73,7 +79,7 @@ Sonuçlar: `C:\Users\aglamazlarefe\claude2\config\projects\D--RW-FC\507f25e3-4c6
   `evaluate.py` ve `pareto_sweep`'te.
 - **Pareto taraması** değerlendirmeyle aynı bankada (40 senaryo, tohum 20240).
 - Eski sürümün modelleri/günlükleri kaldırıldı; geri getirme `docs/LEGACY.md`.
-- Kullanıcı tercihi: otonom çalış, Türkçe iletişim, GPU yok (her şey CPU), push yok.
+- Kullanıcı tercihi: otonom çalış, Türkçe iletişim, GPU yok (her şey CPU); commit/push/PR birleştirme onaysız.
 
 ## 5. Sonuç yorumunu yazarken
 
