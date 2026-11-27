@@ -5,6 +5,7 @@ iyi ayarlanmış klasik kontrolcülerle (Droop/PI/PID) karşılaştırma. Hedef 
 
 ## Önce bunları okuyun
 
+- **`docs/HANDOFF.md` — güncel durum, arka planda çalışan işler ve sıradaki adımlar (önce bunu okuyun)**
 - `docs/SPEC.md` — model denklemleri ve **modül arayüzleri (sözleşme)**
 - `docs/TASKS.md` — iş paketleri ve dosya sahipliği
 - `docs/GOAL.md` — tamamlanma koşulu

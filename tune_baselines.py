@@ -23,12 +23,15 @@ from utils.rollout import run_episode
 
 @dataclass(frozen=True)
 class SearchSpace:
-    """Arama aralıkları (docs/MODEL_VALIDATION.md, kararlı bölge)."""
+    """Arama aralıkları (docs/MODEL_VALIDATION.md, kararlı bölge).
+
+    ki üst sınırı 5 iken PID optimumu sınıra dayandı (ki=4,998); aralık 20'ye genişletildi.
+    """
     droop_k: tuple[float, float] = (0.5, 9.0)
     pi_kp: tuple[float, float] = (0.5, 8.0)
-    pi_ki: tuple[float, float] = (0.1, 5.0)
+    pi_ki: tuple[float, float] = (0.1, 20.0)
     pid_kp: tuple[float, float] = (0.5, 8.0)
-    pid_ki: tuple[float, float] = (0.1, 5.0)
+    pid_ki: tuple[float, float] = (0.1, 20.0)
     pid_kd: tuple[float, float] = (0.0, 2.0)
 
 
@@ -36,7 +39,7 @@ class SearchSpace:
 class ParetoGrid:
     """PI Pareto ızgarası; kp değerleri kararlı aralık (1..8) içindedir."""
     kp: tuple[float, ...] = (1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0)
-    ki: tuple[float, ...] = (0.5, 2.0, 4.0)
+    ki: tuple[float, ...] = (0.5, 2.0, 4.0, 8.0)
 
 
 SPACE = SearchSpace()
