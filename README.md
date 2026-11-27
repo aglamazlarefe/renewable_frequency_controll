@@ -1,235 +1,196 @@
-# ⚡ Renewable Frequency Control via TD3 + Safe-AI Hybrid
+# Rüzgâr Ağırlıklı Mikro Şebekede BESS ile Frekans Kontrolü: TD3/SAC + Güvenlik Kalkanı
 
-**Deep Reinforcement Learning for Secondary Frequency Control in Renewable-Dominated Microgrids**
+İzole bir mikro şebekede batarya enerji depolama sisteminin (BESS) güç komutunu derin pekiştirmeli öğrenme
+(TD3, SAC) ile üreten ve bir PI **güvenlik kalkanı** ile koruyan kontrolcünün, **iyi ayarlanmış** klasik
+kontrolcülerle (Droop, PI, PID) **aynı senaryolar üzerinde, eşleştirilmiş istatistikle** karşılaştırılması.
 
-[![Python](https://img.shields.io/badge/Python-3.9+-blue?logo=python)](https://python.org)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-ee4c2c?logo=pytorch)](https://pytorch.org)
-[![SB3](https://img.shields.io/badge/Stable--Baselines3-2.0+-green)](https://github.com/DLR-RM/stable-baselines3)
-[![Gymnasium](https://img.shields.io/badge/Gymnasium-0.29+-orange)](https://gymnasium.farama.org/)
-
----
-
-## 📖 Overview
-
-This project presents a **Safe-AI hybrid control framework** for secondary frequency regulation in renewable-rich microgrids. A **TD3 (Twin Delayed DDPG)** agent manages the Battery Energy Storage System (BESS) under normal conditions, while a classical **PI controller** acts as a safety shield when frequency deviations exceed ±150 mHz — ensuring both **energy efficiency** and **grid reliability**.
-
-| Key Achievement | Value |
-|:---|---:|
-| Energy Savings vs Pure PI | **21.5%** |
-| CO₂ Avoided per Episode | **5.6 kg** |
-| AI Autonomy Rate | **93.4%** |
-| Training Time (RTX 3060) | ~8 minutes |
+Bu depodaki her sonuç sayısı koddan üretilir: tablo `python evaluate.py --update-readme` ile bu dosyaya yazılır,
+`python scripts/check_goal.py` tablonun `results/results.json` ile birebir aynı olduğunu denetler.
 
 ---
 
-## 🧠 The Problem
+## Önceki sürüm hakkında not
 
-Modern power grids face a critical challenge: **renewable energy sources** (wind, solar) are inherently intermittent. Unlike synchronous generators, they provide **no rotating inertia**, making frequency regulation significantly harder. Traditional PI/PID controllers respond reliably but consume excessive battery energy, while pure RL agents can behave unpredictably near safety boundaries.
+Projenin ilk sürümü (`main` dalı, `9524ce6`) "%21,5 enerji tasarrufu, 5,6 kg CO₂, %93,4 otonomi" bildiriyordu.
+Yeniden yazımdan önce o kodu kendi modeliyle yeniden çalıştırdığımızda **%8,5 tasarruf ve %87,8 otonomi** çıktı
+(`results/before_refactor.txt`). Ayrıca o sürümde sonuçları geçersiz kılan yapısal sorunlar vardı:
 
-**This project's insight**: Combine the *efficiency* of Deep RL with the *safety guarantees* of classical control.
+- Gözlem `Δf/0.2` ile ölçeklenip kontrolcülerde `×0.3` ile geri çevriliyordu; kalkan 150 yerine 100 mHz'de açılıyordu.
+- 2226 saatlik rüzgâr verisi 100 saniyeye sıkıştırılmıştı (bir adım ≈ 2,2 saat).
+- Test profili eğitimde de görülen serinin bir parçasıydı; PI ve TD3 aynı denemede farklı gürültü görüyordu.
+- "Tasarruf", frekansın daha çok sapmasına izin verilmesinden geliyordu (RMSE 51 → 61 mHz); CO₂ iddiası
+  batarya enerji geçişini emisyonla karıştırıyordu.
+
+Bu sürüm modeli, senaryoları, referans kontrolcüleri ve değerlendirmeyi baştan kurar.
 
 ---
 
-## 🏗️ Architecture
+## Model
+
+Küçük sinyal, per-unit model (S_taban = 10 MW, f₀ = 50 Hz). Bütün değişkenler bölüm başındaki denge noktasından
+sapmadır. Kontrol edilen tek büyüklük BESS güç komutu `u`'dur.
 
 ```
-                    ┌─────────────────────────┐
-                    │   EPİAŞ Wind Data (CSV)  │
-                    │   (2226 hours, Turkey)   │
-                    └────────┬────────────────┘
-                             │
-                    ┌────────▼───────────────┐
-                    │   Data Loader           │
-                    │   (normalize + interp)  │
-                    └────────┬────────────────┘
-                             │
-                    ┌────────▼───────────────┐
-                    │   MicrogridLFCEnv       │
-                    │   (Gymnasium)           │
-                    │                         │
-                    │   • Swing Equation       │
-                    │   • Virtual Inertia      │
-                    │   • Safety Shield (PI)   │
-                    │   • Slew Rate Limit      │
-                    └────┬──────────┬─────────┘
-                         │          │
-              ┌──────────▼──┐  ┌────▼──────────┐
-              │  train.py   │  │  evaluate.py   │
-              │  (TD3 SB3)  │  │ (15 Trials)    │
-              │  ~8 min     │  │ 6 Figures      │
-              └─────────────┘  └────┬──────────┘
-                                    │
-              ┌─────────────────────▼──────────┐
-              │   SafeHybridController          │
-              │   ┌────────┐  ┌────────┐        │
-              │   │ TD3 AI │  │ PI Shield │       │
-              │   │ (93%)  │  │  (7%)   │       │
-              │   └────────┘  └────────┘        │
-              │   ⚡ Bumpless Transfer           │
-              └──────────────────────────────────┘
+dΔf/dt    = (ΔP_m + P_ess + ΔP_rüzgâr − ΔP_yük − D·Δf) / (2H)       salınım denklemi
+dΔP_g/dt  = (−ΔP_g − Δf/R + ΔP_c) / T_g                              dizel governor (droop)
+dΔP_m/dt  = (−ΔP_m + ΔP_g) / T_t                                     dizel türbin
+dΔP_c/dt  = −K_agc · (β·Δf − P_ess),   β = D + 1/R                   dizel yavaş AGC
+dP_ess/dt = (−P_ess + u) / T_ess                                     BESS dönüştürücü gecikmesi
 ```
 
-### 🔄 How Safe-AI Works
+AGC'deki `−P_ess` terimi kalıcı dengesizliği dizele devreder: frekansı sıfırlayan her kontrolcüde batarya gücü de
+sıfıra döner. Böylece batarya enerjisi yalnızca geçici rejimde harcanır ve **frekans kalitesi ↔ batarya kullanımı**
+gerçek bir ödünleşim olur.
 
-1. **Normal Operation** → TD3 agent controls the battery (energy-efficient, low wear)
-2. **|Δf| > 150 mHz** → PI controller takes over (guaranteed recovery)
-3. **Bumpless Transfer** → integral term decays smoothly during AI → PI transitions
-4. **Dual protection** → PI shield exists both inside the environment AND in the controller
+Doğrusal kısım 0,1 s adımla **sıfırıncı mertebe tutucu (ZOH) ile kesin** ayrıklaştırılır (`scipy.linalg.expm`);
+`T_g = 0,1 s` iken açık Euler kararsızdır. Doğrusal olmayan kısıtlar (güç sınırı, hız sınırı, SOC sınırları,
+tek yön verim) her adımda girişte uygulanır. Model doğrulaması: [`docs/MODEL_VALIDATION.md`](docs/MODEL_VALIDATION.md).
+
+### Parametreler (`config.py`)
+
+| Grup | Parametre | Değer |
+|---|---|---|
+| Şebeke | H, D, R | 2,0 s · 1,0 pu/pu · 0,05 pu/pu |
+| | T_g, T_t, K_agc | 0,1 s · 0,4 s · 0,1 1/s |
+| | Kontrol adımı | 0,1 s |
+| BESS | Güç sınırı, hız sınırı | 0,2 pu (2 MW) · 2,0 pu/s |
+| | T_ess, kapasite, verim | 0,1 s · 0,5 MWh · %95 (tek yön) |
+| | SOC sınırları | 0,1 – 0,9 |
+| Kalkan | Devreye girme / bırakma | \|Δf\| > 200 mHz / \|Δf\| < 100 mHz ve en az 1 s aktif |
+| | PI kazançları, ceza | k_p = 5, k_i = 2 · adım başına 0,5 |
+| Ödül | w_f, w_u, w_j, w_soc | 1,0 · 0,1 · 0,5 · 0 |
+
+### Senaryolar
+
+EPİAŞ saatlik rüzgâr üretim verisi (20.11.2025 – 20.02.2026, 2226 saat) **kronolojik** bölünür:
+ilk %70 eğitim, son %30 test. Saatlik veri yalnızca **çalışma noktasını** (rüzgâr seviyesi) belirler;
+saniye ölçekli değişim sentetiktir. Her 150 s'lik bölümde:
+
+- rüzgâr türbülansı: Ornstein–Uhlenbeck süreci (zaman sabiti 5 s, ortalama seviyenin %4'ü), rüzgâr kurulu gücü 0,4 pu;
+- %30 olasılıkla 20–40 s süren rüzgâr rampası;
+- 1–3 adet yük adımı (±0,02–0,10 pu, aralarında en az 15 s) ve yük gürültüsü;
+- başlangıç SOC'si 0,3 – 0,7 arasında.
+
+### Kontrolcüler
+
+| Ad | Açıklama |
+|---|---|
+| NoBESS | Batarya yok (alt sınır) |
+| Droop | `u = −k·Δf` |
+| PI | Anti-windup'lı PI |
+| PID | Türevi ölçümden (ROCOF) alınan PID |
+| TD3+Shield | TD3 ajanı + PI güvenlik kalkanı (eğitim ve değerlendirmede aynı sarmalayıcı) |
+| SAC+Shield | SAC ajanı + aynı kalkan |
+| TD3 | Kalkansız eğitilmiş ve kalkansız değerlendirilen TD3 (ablasyon) |
+
+Klasik kontrolcülerin kazançları, RL ile **aynı maliyet fonksiyonu** için eğitim senaryolarında Optuna ile
+ayarlanır (`tune_baselines.py`). Bütün kontrolcüler aynı aktüatör sınırlarından geçer.
+
+**Gözlem (5 boyut, [−1, 1]):** Δf, ROCOF, ∫Δf dt, P_ess, SOC − 0,5.
+**Ödül:** `r = −(w_f·(Δf/0,1 Hz)² + w_u·(P_ess/P_max)² + w_j·(Δu/P_max)² + w_soc·((SOC−0,5)/0,5)²)`,
+kalkan aktifken ayrıca −0,5. Metrikler bu cezayı **içermeyen** görev maliyetiyle hesaplanır; kalkan etkinliği
+ayrıca "ajan özerkliği" olarak raporlanır.
 
 ---
 
-## 📊 Results (15 Independent Trials)
+## Değerlendirme protokolü
 
-| Metric | Pure PI | TD3 Safe-AI (Ours) |
-|:---|---:|---:|
-| Freq RMSE (mHz) | 51.13 ± 2.5 | 61.49 ± 5.8 |
-| Max Deviation (mHz) | 112.46 ± 2.8 | 133.97 ± 12.1 |
-| Control Effort (MWh) | 0.06498 ± 0.002 | **0.05099 ± 0.003** |
-| Signal Jitter | 9.19 ± 0.3 | 20.53 ± 4.0 |
-| Autonomy (%) | 0.0 | **93.4 ± 2.1** |
-| Band <50 mHz (%) | 54.7 | 40.2 |
-| Band <100 mHz (%) | 97.6 | 78.5 |
-| Band <150 mHz (%) | 100.0 | 91.9 |
-| ROCOF Mean (Hz/s) | 0.0075 | 0.0104 |
-| Settling Time (s) | 4.7 | 7.2 |
+- Test bölmesinden sabit tohumlu **40 senaryoluk banka**; her kontrolcü **birebir aynı** senaryoları çalıştırır.
+- RL için 3 eğitim tohumu: senaryo başına metrik tohumlar üzerinden ortalanır, tohum bazlı özet ayrıca saklanır.
+- Özet: ortalama ± standart sapma ve ortalamanın bootstrap %95 güven aralığı.
+- Karşılaştırma: RL kontrolcüsü ile PI / PID arasında senaryo bazında eşleştirilmiş Wilcoxon işaretli sıra testi
+  (`results/results.json` → `comparisons`).
 
-**The trade-off**: Safe-AI saves **21.5% energy** and prevents **5.6 kg CO₂/episode** while maintaining 93% autonomy — at the cost of slightly higher frequency deviation and jitter during RL exploration.
+## Sonuçlar
 
-### 📈 Generated Figures
+<!-- RESULTS:START -->
+<!-- RESULTS:END -->
 
-| Figure | Description |
-|:---|---:|
-| Fig1 — Main Comparison | Frequency & control effort time series |
-| Fig2 — Load Disturbance Zoom | 35–60s window with settling time annotations |
-| Fig3 — Frequency Histogram | Δf distribution with safety bands |
-| Fig4 — Cumulative Energy | Energy savings area + CO₂ annotation |
-| Fig5 — Shield Activation Strip | AI/PI mode timeline + ROCOF |
-| Fig6 — Summary Table | All metrics with bar chart |
+<!-- YORUM -->
+
+### Şekiller
+
+| Şekil | İçerik |
+|---|---|
+| ![](figures/Fig1_Zaman_Serisi.png) | **Şekil 1** — Örnek senaryoda Δf ve BESS gücü |
+| ![](figures/Fig2_Yuk_Adimi_Zoom.png) | **Şekil 2** — İlk yük adımı çevresinde yakınlaştırma |
+| ![](figures/Fig3_Frekans_Histogram.png) | **Şekil 3** — Tüm test senaryolarında Δf dağılımı |
+| ![](figures/Fig4_Enerji_SOC.png) | **Şekil 4** — Kümülatif BESS enerji geçişi ve SOC |
+| ![](figures/Fig5_Kalkan_Seridi.png) | **Şekil 5** — Kalkan etkinlik şeridi |
+| ![](figures/Fig6_Pareto.png) | **Şekil 6** — Frekans RMSE ↔ BESS enerji geçişi: PI kazanç taraması ve kontrolcüler |
+| ![](figures/Fig7_Ozet_Tablo.png) | **Şekil 7** — Özet tablo |
 
 ---
 
-## 🚀 Getting Started
+## Yeniden üretim
 
-### Prerequisites
-
-- Python 3.9+
-- NVIDIA GPU with CUDA (optional, CPU fallback available)
-
-### Installation
+Python 3.11, yalnızca CPU. Sürümler `requirements.txt`'te sabitlenmiştir.
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/renewable-frequency-control.git
-cd renewable-frequency-control
+conda create -n rwfc python=3.11 -y && conda activate rwfc
+pip install torch --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
+
+pytest -q                                            # 69 test (kabul testleri dahil)
+python scripts/validate_model.py                     # model doğrulama tablosu
+python tune_baselines.py                             # → results/baseline_gains.json, results/pareto_pi.json
+for s in 0 1 2; do
+  python train.py --algo td3 --seed $s --steps 150000
+  python train.py --algo sac --seed $s --steps 150000
+done
+python train.py --algo td3 --seed 0 --steps 150000 --no-shield
+python evaluate.py --update-readme                   # → results/, figures/, bu dosyadaki tablo
+python scripts/check_goal.py                         # tamamlanma koşullarını denetler
 ```
 
-### Training
+Bir eğitim koşusu Ryzen 5 5500'de tek iş parçacığıyla yaklaşık 30–40 dakika sürer; koşular paralel çalıştırılabilir.
+TensorBoard günlükleri `logs/` altındadır.
 
-```bash
-# Quick training: 100k steps, ~8 min on RTX 3060
-python train.py
-```
-
-The model is saved to `models/td3_microgrid_model.zip`. Training logs are written to `logs/` (TensorBoard).
-
-### Evaluation
-
-```bash
-# 15-trial comparison with 6 publication-quality figures
-python evaluate.py
-```
-
-Results appear in `figures/` (6 PNGs) and the console prints the metric table.
-
----
-
-## 📦 Dependencies
-
-- `numpy` — numerical computing
-- `pandas` — data loading
-- `matplotlib` — visualization
-- `gymnasium` — RL environment standard
-- `stable-baselines3` — TD3 implementation
-- `torch` — neural network backend
-
----
-
-## 📁 Repository Structure
+## Depo yapısı
 
 ```
-renewable-frequency-control/
-├── README.md                  ← This file
-├── requirements.txt           ← Python dependencies
-├── .gitignore                 ← Ignored files
-├── train.py                   ← TD3 training script
-├── evaluate.py                ← 15-trial benchmark + 6 figures
-├── envs/
-│   ├── __init__.py
-│   └── microgrid_lfc_env.py   ← Gymnasium environment (swing equation + safety shield)
-├── agents/
-│   ├── __init__.py
-│   └── safe_hybrid_controller.py ← AI ↔ PI switching logic
-├── utils/
-│   ├── __init__.py
-│   └── Data_loader.py         ← EPİAŞ CSV loader + normalization
-└── data/
-    └── epias_wind_data.csv    ← Real wind generation data (Turkey EPİAŞ)
+config.py                  tüm parametreler, senaryo tipi, kontrolcü adları (tek doğruluk kaynağı)
+envs/dynamics.py           durum-uzayı modeli ve ZOH ayrıklaştırma
+envs/microgrid_lfc_env.py  Gymnasium ortamı
+envs/scenarios.py          senaryo üretimi ve sabit tohumlu senaryo bankası
+agents/shield.py           histerezisli PI güvenlik kalkanı (gym.Wrapper)
+agents/baselines.py        NoBESS, Droop, PI, PID ve RL sarmalayıcısı
+utils/                     veri yükleyici, rollout, metrikler, grafikler, rapor
+train.py                   TD3 / SAC eğitimi
+tune_baselines.py          referans kazanç ayarı ve PI Pareto taraması
+evaluate.py                eşleştirilmiş değerlendirme, results.json, şekiller
+scripts/                   model doğrulama ve hedef denetleyici
+docs/                      SPEC (arayüz sözleşmesi), model doğrulama, görevler, hedef
+tests/acceptance/          kabul testleri
 ```
 
----
+## Sınırlılıklar
 
-## 📝 Environment Details
+- **Zaman ölçeği:** EPİAŞ verisi saatliktir; saniye ölçekli rüzgâr türbülansı ve yük adımları sentetiktir.
+  Saatlik veri yalnızca rüzgâr seviyesini (türbülans genliğini) belirler.
+- **Normalizasyon:** rüzgâr seviyeleri bölmeden önce tüm serinin en büyük değerine bölünür; bu değer test
+  bölmesindedir (eğitim bölmesinin en büyüğü 0,976). Etkisi türbülans genliğinde %2,5'ten küçüktür.
+- **Model:** tek alanlı, doğrusal küçük sinyal modeli; dizel için tek governor–türbin çifti; BESS'te yaşlanma ve
+  sıcaklık modellenmemiştir. Sonuçlar bu parametre kümesine bağlıdır.
+- **Kalkanlı öğrenme:** kalkan devredeyken SB3'ün tekrar arabelleğine ajanın kendi aksiyonu kaydedilir, uygulanan
+  PI aksiyonu değil. Ajan kalkanı tetikleyen durumlardan cezayla kaçınmayı öğrenir, ama bu geçişlerdeki Q değerleri
+  uygulanan aksiyonu yansıtmaz.
+- **Hiperparametreler:** RL hiperparametreleri için arama yapılmamıştır (SB3 varsayılanlarına yakın, CPU'ya uygun
+  değerler); klasik kontrolcüler ise ayarlanmıştır. Bu karşılaştırma RL aleyhine bir eğilim taşıyabilir.
+- **Eğitim bütçesi:** tohum başına 150 bin adım (100 bölüm).
 
-| Parameter | Value | Description |
-|:---|---:|:---:|
-| `M` | 4.0 | Generator inertia constant |
-| `D` | 0.8 | Damping coefficient |
-| `K_vir` | 0.5 | Virtual inertia gain |
-| `dt` | 0.1 s | Simulation time step |
-| `Slew rate` | ±0.025 pu | Battery ramp limit per step |
-| `Shield threshold` | ±150 mHz | PI takeover boundary |
-| `Shield Kp` | 20.0 | Proportional gain |
-| `Shield Ki` | 8.0 | Integral gain |
-| `Observation` | 3-dim | [Δf/0.2, p_wind, prev_p_ess] |
-| `Action` | 1-dim | Battery power command (pu) |
+## Kaynaklar
 
-### Reward Function
+- Fujimoto, S., van Hoof, H., Meger, D. (2018). *Addressing Function Approximation Error in Actor-Critic Methods*. ICML.
+- Haarnoja, T., Zhou, A., Abbeel, P., Levine, S. (2018). *Soft Actor-Critic*. ICML.
+- Alshiekh, M. vd. (2018). *Safe Reinforcement Learning via Shielding*. AAAI.
+- Kundur, P. (1994). *Power System Stability and Control*. McGraw-Hill.
+- ENTSO-E, *Network Code on Load-Frequency Control and Reserves* (2017).
+- EPİAŞ Şeffaflık Platformu — gerçek zamanlı üretim verisi: [epias.com.tr](https://www.epias.com.tr)
+- [Stable-Baselines3](https://github.com/DLR-RM/stable-baselines3) · [Gymnasium](https://gymnasium.farama.org/)
 
-```
-R = +5 (autonomy bonus)  −  120·Δf² (frequency penalty)
-    − 5·p² (energy penalty)  −  350·Δp² (jitter penalty)
-    − 400·max(0, |Δf|−0.11)² (barrier)
-```
+## Lisans
 
-When the shield is active: the autonomy bonus becomes −2, and jitter penalty is waived.
+Akademik ve eğitim amaçlı kullanım içindir.
 
----
-
-## 🌱 Future Work
-
-- **Solar + wind hybrid** generation profiles
-- **Multi-agent** coordination (multiple BESS units)
-- **Transfer learning** across different grid topologies
-- **Real-time hardware-in-the-loop** validation
-- **SAC vs TD3** architecture comparison
-- **Hyperparameter auto-tuning** with Optuna
-
----
-
-## 📚 References
-
-- Fujimoto, S., Hoof, H., & Meger, D. (2018). *Addressing Function Approximation Error in Actor-Critic Methods*. ICML.
-- EPİAŞ — Turkish Electricity Market Data: [epias.com.tr](https://www.epias.com.tr)
-- Stable-Baselines3: [github.com/DLR-RM/stable-baselines3](https://github.com/DLR-RM/stable-baselines3)
-- Gymnasium: [gymnasium.farama.org](https://gymnasium.farama.org/)
-
----
-
-## 📄 License
-
-This project is provided for academic and educational purposes.
-
----
-
-**Author**: Efe Ağlamazlar  
-**Contact**: [GitHub Profile](https://github.com/YOUR_USERNAME)
+**Yazar:** Efe Ağlamazlar · [github.com/aglamazlarefe](https://github.com/aglamazlarefe)

@@ -180,9 +180,9 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
-# Proje özel — modeller, loglar ve üretilen görseller
+# Proje özel — modeller ve loglar (figures/ ve results/ izlenir: README bunlardan üretilir)
 models/*.zip
+models/**/*.zip
 logs/
-figures/
-*.png
 *.npz
+optuna*.db
